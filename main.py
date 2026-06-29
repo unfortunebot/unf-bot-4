@@ -14,8 +14,8 @@ def home():
     return "Bot 7/24 Aktif!"
 
 def run_web():
-    # Render'ın bota atayacağı portu otomatik yakalıyoruz, bulamazsa 8080 yapar
-    port = int(os.environ.get("PORT", 8080))
+    # Render'ın bota atayacağı portu otomatik yakalıyoruz, bulamazsa 10000 yapar
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -24,17 +24,26 @@ def keep_alive():
 # --------------------------------
 
 # --- AYARLAR ---
-BOT_TOKEN = "BURAYA_DISCORD_BOT_TOKENINI_YAZ"
 FIVEM_SERVER_API = "https://servers-frontend.fivem.net/api/servers/single/r6z8vx" 
 EKIP_ISMI = "UNFORTUNE"
 SUNUCU_ISMI = "PGUN"
+
+# TOKEN KONTROLÜ (Render Çevre Değişkeninden okur, bulamazsa aşağıdaki tırnağa bakar)
+BOT_TOKEN = os.environ.get("DISCORD_TOKEN")
+if not BOT_TOKEN or BOT_TOKEN == "BURAYA_DISCORD_PORTALINDAN_ALDIGIN_YENI_TOKENI_YAPISTIR":
+    # EĞER RENDER ENVIRONMENT KULLANMAK İSTEMEZSEN, YENİ TOKENI DİREKT AŞAĞIDAKİ TIRNAĞIN İÇİNE YAZABİLİRSİN:
+    BOT_TOKEN = "BURAYA_DISCORD_PORTALINDAN_ALDIGIN_YENI_TOKENI_YAPISTIR"
 # ---------------
 
 class MyBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=discord.Intents.default())
+        # Loglardaki intent hatasını çözmek için tüm izinleri açtık
+        bot_intents = discord.Intents.default()
+        bot_intents.message_content = True
+        super().__init__(command_prefix="!", intents=bot_intents)
         
     async def setup_hook(self):
+        # Slash komutlarını Discord'a kaydeder
         await self.tree.sync()
 
 bot = MyBot()
