@@ -14,7 +14,6 @@ def home():
     return "Bot 7/24 Aktif!"
 
 def run_web():
-    # Render portunu yakalar, bulamazsa 10000 portunda ayağa kalkar
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
@@ -25,13 +24,13 @@ def keep_alive():
 
 # --- AYARLAR ---
 FIVEM_IP = "185.137.98.64"
-FIVEM_PORT = "30120"  # Tarayıcı kontrolünde farklı çıktıysa burayı değiştir!
+FIVEM_PORT = "30120"  
 FIVEM_SERVER_API = "https://servers-frontend.fivem.net/api/servers/single/r6z8vx"
 
 EKIP_ISMI = "UNFORTUNE"
 SUNUCU_ISMI = "PGUN"
 
-# TOKEN KONTROLÜ (Render Çevre Değişkeni Önceliklidir)
+# TOKEN KONTROLÜ
 BOT_TOKEN = os.environ.get("DISCORD_TOKEN")
 if not BOT_TOKEN or BOT_TOKEN == "BURAYA_TOKENI_YAPISTIR":
     BOT_TOKEN = "BURAYA_TOKENI_YAPISTIR"
@@ -49,7 +48,6 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 def get_fivem_players():
-    # 1. YÖNTEM: Doğrudan IP:Port üzerinden sorgu
     try:
         url = f"http://{FIVEM_IP}:{FIVEM_PORT}/players.json"
         response = requests.get(url, timeout=4)
@@ -58,7 +56,6 @@ def get_fivem_players():
     except Exception as e:
         print(f"IP ve Port üzerinden veri çekilemedi, yedek sisteme geçiliyor: {e}")
 
-    # 2. YÖNTEM (YEDEK): Resmi FiveM API sorgusu
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -182,7 +179,7 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
     embed.description += "\n\n" + player_list_text
     
     view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="Giriş Yap ↗", url="https://cfx.re/join/r6z8vx", style=discord.ButtonStyle.link))
+    view.add_item(discord.ui.Button(label="Giriş Yap ↗", url=f"https://cfx.re/join/{FIVEM_IP}:{FIVEM_PORT}", style=discord.ButtonStyle.link))
     
     if select_options:
         select_menu = discord.ui.Select(placeholder="DETAYLI SORGU İÇİN OYUNCU SEÇİNİZ", options=select_options)
@@ -192,6 +189,115 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
         view.add_item(select_menu)
         
     await interaction.followup.send(embed=embed, view=view)
+
+
+# --- 🎥 GÖRSELDEKİ GELİŞMİŞ ID SORGU SİSTEMİ ---
+@bot.tree.command(name="idsorgu", description="Sunucudaki bir oyuncuyu detaylı sorgular.")
+@app_commands.describe(
+    sorgu_turu="Sorgu türünü seçin (id, steam, discord)",
+    deger="Aranacak değeri girin (Örn ID için: 748, Steam için: hex adresi)"
+)
+@app_commands.choices(sorgu_turu=[
+    app_commands.Choice(name="id", value="id"),
+    app_commands.Choice(name="steam", value="steam"),
+    app_commands.Choice(name="discord", value="discord")
+])
+async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str):
+    await interaction.response.defer()
+    
+    players = get_fivem_players()
+    if players is None:
+        await interaction.followup.send("❌ Sunucu verilerine erişilemediği için sorgu yapılamıyor.")
+        return
+
+    target_player = None
+    deger_clean = deger.strip().lower()
+
+    # Oyuncuyu arama algoritması
+    for p in players:
+        p_identifiers = p.get("identifiers", [])
+        
+        if sorgu_turu == "id":
+            if str(p.get("id")) == deger_clean:
+                target_player = p
+                break
+        elif sorgu_turu == "steam":
+            # steam:hex yapısını kontrol eder
+            for ident in p_identifiers:
+                if ident.startswith("steam:") and deger_clean in ident.lower():
+                    target_player = p
+                    break
+            if target_player: break
+        elif sorgu_turu == "discord":
+            # discord:id yapısını kontrol eder
+            for ident in p_identifiers:
+                if ident.startswith("discord:") and deger_clean in ident.lower():
+                    target_player = p
+                    break
+            if target_player: break
+
+    if not target_player:
+        await interaction.followup.send(f"❌ Belirtilen kriterlere uygun (`{sorgu_turu}: {deger}`) aktif bir oyuncu sunucuda bulunamadı.")
+        return
+
+    # Oyuncu verilerini ayrıştırma
+    p_id = target_player.get("id", "Bilinmiyor")
+    p_name = target_player.get("name", "Bilinmiyor")
+    p_ping = target_player.get("ping", "0")
+    
+    steam_hex = "Bulunamadı"
+    license_id = "Bulunamadı"
+    discord_id = "Bulunamadı"
+    discord_mention = "Bulunamadı"
+
+    for ident in target_player.get("identifiers", []):
+        if ident.startswith("steam:"):
+            steam_hex = ident.replace("steam:", "")
+        elif ident.startswith("license:"):
+            license_id = ident.replace("license:", "")
+            if len(license_id) > 15:
+                license_id = f"{license_id[:15]}..." # Görseldeki gibi uzunsa kırpıyoruz
+        elif ident.startswith("discord:"):
+            discord_id = ident.replace("discord:", "")
+            discord_mention = f"<@{discord_id}>"
+
+    # Görsel şablona birebir sadık kalınarak hazırlanan Embed tasarımı
+    embed = discord.Embed(
+        title=f"» Oyuncu Profili / {SUNUCU_ISMI} PVP",
+        color=discord.Color.from_rgb(140, 71, 243)  # Görseldeki mor/efflatun tonu
+    )
+    
+    # Bilgilerin şablon hizalaması
+    info_text = (
+        f"```md\n"
+        f"ID         : {p_id}\n"
+        f"İsim       : {p_name}\n"
+        f"Ping       : {p_ping} ms\n"
+        f"Steam Hex  : {steam_hex}\n"
+        f"Lisans     : {license_id}\n"
+        f"Discord ID : {discord_id}\n"
+        f"```"
+    )
+    embed.description = info_text
+    
+    # Discord Hesabı alanı
+    embed.add_field(name="🔗 Discord Hesabı:", value=discord_mention, inline=False)
+    
+    # Alt bilgi alanları ve butonlar
+    embed.add_field(name="Oyuncunun Yanına Git", value="Sunucuya hızlı bağlanmak için butonu kullanabilirsin.", inline=False)
+    
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(
+        label="Sunucuya Bağlan ↗", 
+        url=f"https://cfx.re/join/{FIVEM_IP}:{FIVEM_PORT}", 
+        style=discord.ButtonStyle.link
+    ))
+    
+    # Eğer oyuncunun Discord profil resmi varsa ekleme çabası (Discord API kısıtlılığı nedeniyle yoksa varsayılan kalır)
+    embed.set_thumbnail(url="https://images.gamebanana.com/img/ico/sprays/5cfa320092289.png") 
+
+    await interaction.followup.send(embed=embed, view=view)
+
 
 keep_alive()
 bot.run(BOT_TOKEN)
