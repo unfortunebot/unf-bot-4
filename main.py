@@ -2,6 +2,26 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import requests
+from flask import Flask
+from threading import Thread
+import os
+
+# --- WEB SUNUCU (RENDER İÇİN) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot 7/24 Aktif!"
+
+def run_web():
+    # Render'ın bota atayacağı portu otomatik yakalıyoruz, bulamazsa 8080 yapar
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+# --------------------------------
 
 # --- AYARLAR ---
 BOT_TOKEN = "BURAYA_DISCORD_BOT_TOKENINI_YAZ"
@@ -158,4 +178,6 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
         
     await interaction.followup.send(embed=embed, view=view)
 
+# Botu ve Web Sunucusunu aynı anda ateşliyoruz
+keep_alive()
 bot.run(BOT_TOKEN)
