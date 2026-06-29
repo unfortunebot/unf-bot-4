@@ -48,13 +48,14 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 def get_fivem_players():
+    # Temel oyuncu listesini çekiyoruz
     try:
         url = f"http://{FIVEM_IP}:{FIVEM_PORT}/players.json"
         response = requests.get(url, timeout=4)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        print(f"IP ve Port üzerinden veri çekilemedi, yedek sisteme geçiliyor: {e}")
+        print(f"IP üzerinden players.json çekilemedi: {e}")
 
     try:
         headers = {
@@ -65,9 +66,20 @@ def get_fivem_players():
             data = response.json()
             return data.get("Data", {}).get("players", [])
     except Exception as e:
-        print(f"Yedek FiveM API bağlantısı da başarısız oldu: {e}")
+        print(f"Yedek FiveM API bağlantısı başarısız oldu: {e}")
         
     return None
+
+def get_dynamic_identifiers():
+    # Gizli ve detaylı kimlik bilgilerini barındıran dynamic.json verisini çeker
+    try:
+        url = f"http://{FIVEM_IP}:{FIVEM_PORT}/dynamic.json"
+        response = requests.get(url, timeout=4)
+        if response.status_code == 200:
+            return response.json().get("clients", [])
+    except Exception as e:
+        print(f"dynamic.json çekilemedi: {e}")
+    return []
 
 def detect_teams(players):
     teams = {}
@@ -191,7 +203,7 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
     await interaction.followup.send(embed=embed, view=view)
 
 
-# --- 🎥 GÖRSELDEKİ GELİŞMİŞ ID SORGU SİSTEMİ ---
+# --- 🎥 FIXLENMIŞ GELİŞMİŞ ID SORGU SİSTEMİ ---
 @bot.tree.command(name="idsorgu", description="Sunucudaki bir oyuncuyu detaylı sorgular.")
 @app_commands.describe(
     sorgu_turu="Sorgu türünü seçin (id, steam, discord)",
@@ -213,28 +225,60 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
     target_player = None
     deger_clean = deger.strip().lower()
 
+    # İki kaynaktan gelen verileri harmanlamak için dynamic listesini de çekiyoruz
+    dynamic_clients = get_dynamic_identifiers()
+
     # Oyuncuyu arama algoritması
     for p in players:
-        p_identifiers = p.get("identifiers", [])
+        p_id_str = str(p.get("id"))
         
+        # Eğer players.json içinde identifier'lar gizliyse, dynamic.json'dan çekmeye çalışıyoruz
+        p_identifiers = p.get("identifiers", [])
+        if not p_identifiers:
+            for dc in dynamic_clients:
+                if str(dc.get("id")) == p_id_str:
+                    p_identifiers = dc.get("identifiers", [])
+                    p["identifiers"] = p_identifiers # Veriyi bota yedekle
+                    break
+
         if sorgu_turu == "id":
-            if str(p.get("id")) == deger_clean:
+            if p_id_str == deger_clean:
                 target_player = p
                 break
         elif sorgu_turu == "steam":
-            # steam:hex yapısını kontrol eder
             for ident in p_identifiers:
                 if ident.startswith("steam:") and deger_clean in ident.lower():
                     target_player = p
                     break
             if target_player: break
         elif sorgu_turu == "discord":
-            # discord:id yapısını kontrol eder
             for ident in p_identifiers:
                 if ident.startswith("discord:") and deger_clean in ident.lower():
                     target_player = p
                     break
             if target_player: break
+
+    # Eğer players.json'da bulunamadıysa doğrudan dynamic_clients içinde derin arama yapalım
+    if not target_player:
+        for dc in dynamic_clients:
+            p_identifiers = dc.get("identifiers", [])
+            dc_id_str = str(dc.get("id"))
+            
+            if sorgu_turu == "id" and dc_id_str == deger_clean:
+                target_player = dc
+                break
+            elif sorgu_turu == "steam":
+                for ident in p_identifiers:
+                    if ident.startswith("steam:") and deger_clean in ident.lower():
+                        target_player = dc
+                        break
+                if target_player: break
+            elif sorgu_turu == "discord":
+                for ident in p_identifiers:
+                    if ident.startswith("discord:") and deger_clean in ident.lower():
+                        target_player = dc
+                        break
+                if target_player: break
 
     if not target_player:
         await interaction.followup.send(f"❌ Belirtilen kriterlere uygun (`{sorgu_turu}: {deger}`) aktif bir oyuncu sunucuda bulunamadı.")
@@ -250,24 +294,24 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
     discord_id = "Bulunamadı"
     discord_mention = "Bulunamadı"
 
+    # Tanımlayıcıları (Identifiers) çözme
     for ident in target_player.get("identifiers", []):
         if ident.startswith("steam:"):
             steam_hex = ident.replace("steam:", "")
         elif ident.startswith("license:"):
             license_id = ident.replace("license:", "")
             if len(license_id) > 15:
-                license_id = f"{license_id[:15]}..." # Görseldeki gibi uzunsa kırpıyoruz
+                license_id = f"{license_id[:15]}..."
         elif ident.startswith("discord:"):
             discord_id = ident.replace("discord:", "")
             discord_mention = f"<@{discord_id}>"
 
-    # Görsel şablona birebir sadık kalınarak hazırlanan Embed tasarımı
+    # Şık Embed Tasarımı
     embed = discord.Embed(
         title=f"» Oyuncu Profili / {SUNUCU_ISMI} PVP",
-        color=discord.Color.from_rgb(140, 71, 243)  # Görseldeki mor/efflatun tonu
+        color=discord.Color.from_rgb(140, 71, 243)
     )
     
-    # Bilgilerin şablon hizalaması
     info_text = (
         f"```md\n"
         f"ID         : {p_id}\n"
@@ -280,10 +324,7 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
     )
     embed.description = info_text
     
-    # Discord Hesabı alanı
     embed.add_field(name="🔗 Discord Hesabı:", value=discord_mention, inline=False)
-    
-    # Alt bilgi alanları ve butonlar
     embed.add_field(name="Oyuncunun Yanına Git", value="Sunucuya hızlı bağlanmak için butonu kullanabilirsin.", inline=False)
     
     view = discord.ui.View()
@@ -293,7 +334,6 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
         style=discord.ButtonStyle.link
     ))
     
-    # Eğer oyuncunun Discord profil resmi varsa ekleme çabası (Discord API kısıtlılığı nedeniyle yoksa varsayılan kalır)
     embed.set_thumbnail(url="https://images.gamebanana.com/img/ico/sprays/5cfa320092289.png") 
 
     await interaction.followup.send(embed=embed, view=view)
