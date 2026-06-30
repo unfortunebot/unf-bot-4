@@ -48,14 +48,7 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 def get_fivem_players():
-    try:
-        url = f"http://{FIVEM_IP}:{FIVEM_PORT}/players.json"
-        response = requests.get(url, timeout=3)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"IP üzerinden players.json çekilemedi: {e}")
-
+    # Güvenlik duvarına takılmamak için doğrudan resmi FiveM API'sini kullanıyoruz
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -65,19 +58,8 @@ def get_fivem_players():
             data = response.json()
             return data.get("Data", {}).get("players", [])
     except Exception as e:
-        print(f"Yedek FiveM API bağlantısı başarısız oldu: {e}")
-        
+        print(f"FiveM API bağlantısı başarısız: {e}")
     return None
-
-def get_dynamic_identifiers():
-    try:
-        url = f"http://{FIVEM_IP}:{FIVEM_PORT}/dynamic.json"
-        response = requests.get(url, timeout=3)
-        if response.status_code == 200:
-            return response.json().get("clients", [])
-    except Exception as e:
-        print(f"dynamic.json çekilemedi: {e}")
-    return []
 
 def detect_teams(players):
     teams = {}
@@ -117,8 +99,8 @@ async def aktif_ekipler(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
         players = get_fivem_players()
-        if players is None:
-            await interaction.followup.send("❌ Sunucu verilerine ulaşılamadı. Lütfen sunucu durumunu kontrol edin.")
+        if not players:
+            await interaction.followup.send("❌ Sunucu verilerine şu anda ulaşılamıyor.")
             return
 
         teams, sivil_count = detect_teams(players)
@@ -147,7 +129,6 @@ async def aktif_ekipler(interaction: discord.Interaction):
         
         await interaction.followup.send(embed=embed, view=view)
     except Exception as e:
-        print(f"aktif-ekipler hatası: {e}")
         await interaction.followup.send("❌ Komut işlenirken bir hata oluştu.")
 
 @bot.tree.command(name="ekipid", description="İsmini girdiğiniz ekibin aktif oyuncularını ve ID'lerini listeler.")
@@ -156,7 +137,7 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
     await interaction.response.defer()
     try:
         players = get_fivem_players()
-        if players is None:
+        if not players:
             await interaction.followup.send("❌ Sunucu verileri çekilemedi.")
             return
             
@@ -203,111 +184,64 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
             
         await interaction.followup.send(embed=embed, view=view)
     except Exception as e:
-        print(f"ekipid hatası: {e}")
         await interaction.followup.send("❌ Komut işlenirken bir hata oluştu.")
 
 
-# --- TAKILMA PROBLEMİ FIXLENMİŞ ID SORGU SİSTEMİ ---
+# --- 🎥 OYUNCU KİMLİK TESPİT SİSTEMİ (/IDSORGU) ---
 @bot.tree.command(name="idsorgu", description="Sunucudaki bir oyuncuyu detaylı sorgular.")
 @app_commands.describe(
-    sorgu_turu="Sorgu türünü seçin (id, steam, discord)",
-    deger="Aranacak değeri girin (Örn ID için: 748, Steam için: hex adresi)"
+    sorgu_turu="Sorgu türünü seçin (id, isim)",
+    deger="Aranacak değeri girin (Örn ID için: 755, İsim için: SLNZ)"
 )
 @app_commands.choices(sorgu_turu=[
     app_commands.Choice(name="id", value="id"),
-    app_commands.Choice(name="steam", value="steam"),
-    app_commands.Choice(name="discord", value="discord")
+    app_commands.Choice(name="isim", value="isim")
 ])
 async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str):
     await interaction.response.defer()
     
     try:
         players = get_fivem_players()
-        if players is None:
+        if not players:
             await interaction.followup.send("❌ Sunucu verilerine şu anda erişilemiyor. Lütfen az sonra tekrar deneyin.")
             return
 
         target_player = None
         deger_clean = deger.strip().lower()
-        dynamic_clients = get_dynamic_identifiers()
 
+        # Oyuncuyu arama algoritması
         for p in players:
             p_id_str = str(p.get("id"))
-            p_identifiers = p.get("identifiers", [])
-            if not p_identifiers:
-                for dc in dynamic_clients:
-                    if str(dc.get("id")) == p_id_str:
-                        p_identifiers = dc.get("identifiers", [])
-                        p["identifiers"] = p_identifiers
-                        break
+            p_name = str(p.get("name", "")).lower()
 
-            if sorgu_turu == "id":
-                if p_id_str == deger_clean:
-                    target_player = p
-                    break
-            elif sorgu_turu == "steam":
-                for ident in p_identifiers:
-                    if ident.startswith("steam:") and deger_clean in ident.lower():
-                        target_player = p
-                        break
-                if target_player: break
-            elif sorgu_turu == "discord":
-                for ident in p_identifiers:
-                    if ident.startswith("discord:") and deger_clean in ident.lower():
-                        target_player = p
-                        break
-                if target_player: break
+            if sorgu_turu == "id" and p_id_str == deger_clean:
+                target_player = p
+                break
+            elif sorgu_turu == "isim" and deger_clean in p_name:
+                target_player = p
+                break
 
         if not target_player:
-            for dc in dynamic_clients:
-                p_identifiers = dc.get("identifiers", [])
-                dc_id_str = str(dc.get("id"))
-                
-                if sorgu_turu == "id" and dc_id_str == deger_clean:
-                    target_player = dc
-                    break
-                elif sorgu_turu == "steam":
-                    for ident in p_identifiers:
-                        if ident.startswith("steam:") and deger_clean in ident.lower():
-                            target_player = dc
-                            break
-                    if target_player: break
-                elif sorgu_turu == "discord":
-                    for ident in p_identifiers:
-                        if ident.startswith("discord:") and deger_clean in ident.lower():
-                            target_player = dc
-                            break
-                    if target_player: break
-
-        if not target_player:
-            await interaction.followup.send(f"❌ Belirtilen kriterlere uygun (`{sorgu_turu}: {deger}`) aktif bir oyuncu sunucuda bulunamadı.")
+            await interaction.followup.send(f"❌ Sunucuda `{deger}` bilgisine sahip aktif bir oyuncu bulunamadı.")
             return
 
+        # Bilgileri resmi API'den güvenle çekiyoruz
         p_id = target_player.get("id", "Bilinmiyor")
         p_name = target_player.get("name", "Bilinmiyor")
         p_ping = target_player.get("ping", "0")
         
-        steam_hex = "Bulunamadı"
-        license_id = "Bulunamadı"
-        discord_id = "Bulunamadı"
+        # Sunucu IP korumalı olduğu için bu kısımlar sabit kalıyor
+        steam_hex = "Bulunamadı (Sunucu Koruması)"
+        license_id = "Bulunamadı (Sunucu Koruması)"
+        discord_id = "Bulunamadı (Sunucu Koruması)"
         discord_mention = "Bulunamadı"
 
-        for ident in target_player.get("identifiers", []):
-            if ident.startswith("steam:"):
-                steam_hex = ident.replace("steam:", "")
-            elif ident.startswith("license:"):
-                license_id = ident.replace("license:", "")
-                if len(license_id) > 15:
-                    license_id = f"{license_id[:15]}..."
-            elif ident.startswith("discord:"):
-                discord_id = ident.replace("discord:", "")
-                discord_mention = f"<@{discord_id}>"
-
         embed = discord.Embed(
-            title=f"» Oyuncu Profilili / {SUNUCU_ISMI} PVP",
+            title=f"» Oyuncu Profili / {SUNUCU_ISMI} PVP",
             color=discord.Color.from_rgb(140, 71, 243)
         )
         
+        # Birebir görseldeki şablon düzeni
         info_text = (
             f"```md\n"
             f"ID         : {p_id}\n"
@@ -334,8 +268,8 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
 
         await interaction.followup.send(embed=embed, view=view)
     except Exception as e:
-        print(f"idsorgu komutunda kritik hata oluştu: {e}")
-        await interaction.followup.send("❌ Sorgu yapılırken beklenmeyen bir hata oluştu veya sunucu API'si zaman aşımına uğradı.")
+        print(f"Hata logu: {e}")
+        await interaction.followup.send("❌ Sorgu sırasında teknik bir sorun oluştu.")
 
 
 # --- RENDER WEB SERVICE BAŞLATICI SİSTEMİ ---
