@@ -6,7 +6,6 @@ from flask import Flask
 from threading import Thread
 import os
 import sys
-import re
 
 # --- WEB SUNUCU (RENDER WEB SERVICE UYUMLU) ---
 app = Flask('')
@@ -27,6 +26,7 @@ def run_web():
 # --- AYARLAR ---
 FIVEM_IP = "185.137.98.64"
 FIVEM_PORT = "30120"  
+FIVEM_SERVER_TOKEN = "r6z8vx" # Gönderdiğin linkteki kesin sunucu kodu
 
 EKIP_ISMI = "UNFORTUNE"
 SUNUCU_ISMI = "PGUN"
@@ -48,35 +48,25 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 def get_fivem_players():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    
-    # 1. ADIM: Güncel cfx tokenini cfx.re yönlendirmesinden dinamik olarak yakalıyoruz
-    server_token = None
+    # FiveM API'sinin güvenlik duvarını (Cloudflare) geçmek için gerçek tarayıcı taklidi yapıyoruz
     try:
-        cfx_url = f"https://cfx.re/join/{FIVEM_IP}:{FIVEM_PORT}"
-        response = requests.get(cfx_url, headers=headers, timeout=4, allow_redirects=True)
-        # Yönlendirilen url içerisinden sunucu kodunu (örn: r6z8vx) cımbızla çekiyoruz
-        match = re.search(r'join/([a-z0-9]+)', response.url)
-        if match:
-            server_token = match.group(1)
-    except Exception as e:
-        print(f"Dinamik sunucu tokeni yakalanamadı: {e}")
-
-    # Eğer yönlendirmeden bulunamazsa eski çalışan kodu yedek olarak tanımlıyoruz
-    if not server_token:
-        server_token = "r6z8vx"
-
-    # 2. ADIM: Yakalanan güncel token ile resmi FiveM API'sine istek atıyoruz
-    try:
-        dynamic_api_url = f"https://servers-frontend.fivem.net/api/servers/single/{server_token}"
-        response = requests.get(dynamic_api_url, headers=headers, timeout=5)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Origin': 'https://servers.fivem.net',
+            'Referer': 'https://servers.fivem.net/'
+        }
+        url = f"https://servers-frontend.fivem.net/api/servers/single/{FIVEM_SERVER_TOKEN}"
+        response = requests.get(url, headers=headers, timeout=6)
+        
         if response.status_code == 200:
             data = response.json()
             return data.get("Data", {}).get("players", [])
+        else:
+            print(f"FiveM API Hata döndürdü Durum Kodu: {response.status_code}")
     except Exception as e:
-        print(f"Resmi FiveM API bağlantısı başarısız: {e}")
+        print(f"FiveM Resmi API bağlantı hatası: {e}")
         
     return None
 
@@ -119,7 +109,7 @@ async def aktif_ekipler(interaction: discord.Interaction):
     try:
         players = get_fivem_players()
         if not players:
-            await interaction.followup.send("❌ Sunucu verilerine şu anda ulaşılamıyor. Sunucu kapalı olabilir veya API yanıt vermiyor.")
+            await interaction.followup.send("❌ Sunucu verilerine şu anda ulaşılamıyor. FiveM API yoğun olabilir, lütfen az sonra tekrar deneyin.")
             return
 
         teams, sivil_count = detect_teams(players)
