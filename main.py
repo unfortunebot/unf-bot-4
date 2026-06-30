@@ -6,6 +6,7 @@ from flask import Flask
 from threading import Thread
 import os
 import sys
+import re
 
 # --- WEB SUNUCU (RENDER WEB SERVICE UYUMLU) ---
 app = Flask('')
@@ -26,7 +27,6 @@ def run_web():
 # --- AYARLAR ---
 FIVEM_IP = "185.137.98.64"
 FIVEM_PORT = "30120"  
-FIVEM_SERVER_API = "https://servers-frontend.fivem.net/api/servers/single/r6z8vx"
 
 EKIP_ISMI = "UNFORTUNE"
 SUNUCU_ISMI = "PGUN"
@@ -48,17 +48,36 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 def get_fivem_players():
-    # Güvenlik duvarına takılmamak için doğrudan resmi FiveM API'sini kullanıyoruz
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    # 1. ADIM: Güncel cfx tokenini cfx.re yönlendirmesinden dinamik olarak yakalıyoruz
+    server_token = None
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        response = requests.get(FIVEM_SERVER_API, headers=headers, timeout=4)
+        cfx_url = f"https://cfx.re/join/{FIVEM_IP}:{FIVEM_PORT}"
+        response = requests.get(cfx_url, headers=headers, timeout=4, allow_redirects=True)
+        # Yönlendirilen url içerisinden sunucu kodunu (örn: r6z8vx) cımbızla çekiyoruz
+        match = re.search(r'join/([a-z0-9]+)', response.url)
+        if match:
+            server_token = match.group(1)
+    except Exception as e:
+        print(f"Dinamik sunucu tokeni yakalanamadı: {e}")
+
+    # Eğer yönlendirmeden bulunamazsa eski çalışan kodu yedek olarak tanımlıyoruz
+    if not server_token:
+        server_token = "r6z8vx"
+
+    # 2. ADIM: Yakalanan güncel token ile resmi FiveM API'sine istek atıyoruz
+    try:
+        dynamic_api_url = f"https://servers-frontend.fivem.net/api/servers/single/{server_token}"
+        response = requests.get(dynamic_api_url, headers=headers, timeout=5)
         if response.status_code == 200:
             data = response.json()
             return data.get("Data", {}).get("players", [])
     except Exception as e:
-        print(f"FiveM API bağlantısı başarısız: {e}")
+        print(f"Resmi FiveM API bağlantısı başarısız: {e}")
+        
     return None
 
 def detect_teams(players):
@@ -100,7 +119,7 @@ async def aktif_ekipler(interaction: discord.Interaction):
     try:
         players = get_fivem_players()
         if not players:
-            await interaction.followup.send("❌ Sunucu verilerine şu anda ulaşılamıyor.")
+            await interaction.followup.send("❌ Sunucu verilerine şu anda ulaşılamıyor. Sunucu kapalı olabilir veya API yanıt vermiyor.")
             return
 
         teams, sivil_count = detect_teams(players)
@@ -187,7 +206,7 @@ async def ekip_id(interaction: discord.Interaction, ekip_ismi: str):
         await interaction.followup.send("❌ Komut işlenirken bir hata oluştu.")
 
 
-# --- 🎥 OYUNCU KİMLİK TESPİT SİSTEMİ (/IDSORGU) ---
+# --- OYUNCU KİMLİK TESPİT SİSTEMİ (/IDSORGU) ---
 @bot.tree.command(name="idsorgu", description="Sunucudaki bir oyuncuyu detaylı sorgular.")
 @app_commands.describe(
     sorgu_turu="Sorgu türünü seçin (id, isim)",
@@ -209,7 +228,6 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
         target_player = None
         deger_clean = deger.strip().lower()
 
-        # Oyuncuyu arama algoritması
         for p in players:
             p_id_str = str(p.get("id"))
             p_name = str(p.get("name", "")).lower()
@@ -225,12 +243,10 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
             await interaction.followup.send(f"❌ Sunucuda `{deger}` bilgisine sahip aktif bir oyuncu bulunamadı.")
             return
 
-        # Bilgileri resmi API'den güvenle çekiyoruz
         p_id = target_player.get("id", "Bilinmiyor")
         p_name = target_player.get("name", "Bilinmiyor")
         p_ping = target_player.get("ping", "0")
         
-        # Sunucu IP korumalı olduğu için bu kısımlar sabit kalıyor
         steam_hex = "Bulunamadı (Sunucu Koruması)"
         license_id = "Bulunamadı (Sunucu Koruması)"
         discord_id = "Bulunamadı (Sunucu Koruması)"
@@ -241,7 +257,6 @@ async def id_sorgu(interaction: discord.Interaction, sorgu_turu: str, deger: str
             color=discord.Color.from_rgb(140, 71, 243)
         )
         
-        # Birebir görseldeki şablon düzeni
         info_text = (
             f"```md\n"
             f"ID         : {p_id}\n"
